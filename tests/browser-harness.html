@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <title>Temu Ads ROAS Browser Harness</title>
+    <style>
+      body {
+        margin: 24px;
+        color: #172033;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      table {
+        width: 960px;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        padding: 10px;
+        border: 1px solid #dbe2ec;
+        text-align: left;
+      }
+    </style>
+    <script>
+      const storageState = {
+        sync: {
+          enabled: true,
+          temuMallId: "",
+          temuAntiContent: "",
+          temuOnlyOngoing: true,
+          defaultCost: "80",
+          rowSelector: "",
+          spuSelector: "",
+          targetRoasSelector: ""
+        },
+        local: {
+          costBySpu: {},
+          targetRoasBySpu: {}
+        }
+      };
+
+      window.__temuHarnessStorage = storageState;
+
+      function createStorageArea(areaName) {
+        return {
+          get(defaults, callback) {
+            callback({
+              ...defaults,
+              ...storageState[areaName]
+            });
+          },
+          set(values, callback) {
+            storageState[areaName] = {
+              ...storageState[areaName],
+              ...values
+            };
+            callback?.();
+          }
+        };
+      }
+
+      window.chrome = {
+        runtime: {
+          onMessage: {
+            addListener() {}
+          }
+        },
+        storage: {
+          sync: createStorageArea("sync"),
+          local: createStorageArea("local"),
+          onChanged: {
+            addListener() {}
+          }
+        }
+      };
+    </script>
+    <script src="../src/temu-price.js"></script>
+    <script src="../src/roas.js"></script>
+  </head>
+  <body>
+    <h1>Temu Ads ROAS Browser Harness</h1>
+    <table>
+      <thead>
+        <tr>
+          <th>商品</th>
+          <th>投放</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr data-testid="promotion-row">
+          <td>
+            <strong>测试商品</strong>
+            <div>SPU ID: 9401217708</div>
+            <div>目标 ROAS: 4</div>
+          </td>
+          <td>推广中</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <script src="../src/content.js"></script>
+  </body>
+</html>

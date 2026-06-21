@@ -1,0 +1,9 @@
+{
+  "name": "temu-ads-roas-helper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Temu Ads ROAS helper browser extension.",
+  "scripts": {
+    "test": "node tests/core.test.js"
+  }
+}

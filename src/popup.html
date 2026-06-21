@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Temu Ads ROAS</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="popup">
+      <header class="header">
+        <div>
+          <h1>Temu Ads ROAS</h1>
+          <p>推广列表回本 ROAS 计算</p>
+        </div>
+        <label class="switch" title="启用页面计算">
+          <input id="enabled" type="checkbox">
+          <span></span>
+        </label>
+      </header>
+
+      <section class="section">
+        <div class="grid two">
+          <label class="field">
+            <span>Mall ID</span>
+            <input id="temuMallId" type="text" placeholder="634418213588312">
+          </label>
+          <label class="field">
+            <span>默认成本价</span>
+            <input id="defaultCost" type="number" min="0" step="0.01" placeholder="0">
+          </label>
+        </div>
+
+        <label class="checkbox">
+          <input id="temuOnlyOngoing" type="checkbox">
+          <span>只取进行中活动 sessionStatus=2</span>
+        </label>
+
+        <label class="field">
+          <span>anti-content</span>
+          <textarea id="temuAntiContent" spellcheck="false" placeholder="可选；如果接口返回风控错误，可从当前页面请求里复制"></textarea>
+        </label>
+      </section>
+
+      <section class="section">
+        <div class="grid two">
+          <label class="field">
+            <span>行选择器</span>
+            <input id="rowSelector" type="text" placeholder=".table-row">
+          </label>
+          <label class="field">
+            <span>SPU 选择器</span>
+            <input id="spuSelector" type="text" placeholder=".spu-id">
+          </label>
+        </div>
+
+        <label class="field">
+          <span>目标 ROAS 选择器</span>
+          <input id="targetRoasSelector" type="text" placeholder=".target-roas">
+        </label>
+      </section>
+
+      <section class="section">
+        <label class="field">
+          <span>SPU 成本价</span>
+          <textarea id="costBySpu" spellcheck="false" placeholder="123456789=18.5&#10;987654321=22"></textarea>
+        </label>
+      </section>
+
+      <footer class="actions">
+        <button id="save" type="button" class="primary">保存</button>
+        <button id="scan" type="button">扫描当前页</button>
+      </footer>
+
+      <p id="status" class="status" role="status"></p>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

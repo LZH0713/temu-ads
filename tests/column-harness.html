@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <title>Temu Ads ROAS Column Harness</title>
+    <style>
+      body {
+        margin: 16px;
+        color: #172033;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      table {
+        width: 1500px;
+        table-layout: fixed;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        padding: 10px;
+        border: 1px solid #dbe2ec;
+        text-align: left;
+        vertical-align: top;
+      }
+    </style>
+    <script>
+      const storageState = {
+        sync: {
+          enabled: true,
+          temuMallId: "",
+          temuAntiContent: "",
+          temuOnlyOngoing: true,
+          defaultCost: "80",
+          rowSelector: "",
+          spuSelector: "",
+          targetRoasSelector: ""
+        },
+        local: {
+          costBySpu: {},
+          targetRoasBySpu: {}
+        }
+      };
+
+      window.chrome = {
+        runtime: {
+          onMessage: {
+            addListener() {}
+          }
+        },
+        storage: {
+          sync: {
+            get(defaults, callback) {
+              callback({ ...defaults, ...storageState.sync });
+            },
+            set(values, callback) {
+              storageState.sync = { ...storageState.sync, ...values };
+              callback?.();
+            }
+          },
+          local: {
+            get(defaults, callback) {
+              callback({ ...defaults, ...storageState.local });
+            },
+            set(values, callback) {
+              storageState.local = { ...storageState.local, ...values };
+              callback?.();
+            }
+          },
+          onChanged: {
+            addListener() {}
+          }
+        }
+      };
+    </script>
+    <script src="../src/temu-price.js"></script>
+    <script src="../src/roas.js"></script>
+  </head>
+  <body>
+    <table>
+      <colgroup>
+        <col style="width: 40px">
+        <col style="width: 40px">
+        <col style="width: 360px">
+        <col style="width: 90px">
+        <col style="width: 140px">
+        <col style="width: 100px">
+        <col style="width: 100px">
+      </colgroup>
+      <thead>
+        <tr>
+          <th></th>
+          <th></th>
+          <th>商品推广</th>
+          <th>状态</th>
+          <th>预算和出价</th>
+          <th>操作</th>
+          <th>总花费</th>
+        </tr>
+      </thead>
+    </table>
+
+    <table>
+      <colgroup>
+        <col style="width: 40px">
+        <col style="width: 40px">
+        <col style="width: 360px">
+        <col style="width: 90px">
+        <col style="width: 140px">
+        <col style="width: 100px">
+        <col style="width: 100px">
+      </colgroup>
+      <tbody>
+        <tr>
+          <td colspan="3">共1项</td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td>¥22.67</td>
+        </tr>
+        <tr data-testid="promotion-row">
+          <td><input type="checkbox"></td>
+          <td></td>
+          <td>
+            <strong>测试商品</strong>
+            <div>商品ID: 606390743612085</div>
+            <div>申报价:¥118.79~¥118.79</div>
+            <div>SPU ID: 6026781341</div>
+          </td>
+          <td>投放中</td>
+          <td>
+            <div>推广日预算: 不限</div>
+            <div>目标ROAS: 11</div>
+          </td>
+          <td>详情 数据 更多</td>
+          <td>¥22.67</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div role="dialog" aria-modal="true">
+      <h2>选择要推广的商品</h2>
+      <table data-testid="dialog-product-table">
+        <colgroup>
+          <col style="width: 40px">
+          <col style="width: 360px">
+          <col style="width: 120px">
+          <col style="width: 120px">
+        </colgroup>
+        <thead>
+          <tr>
+            <th></th>
+            <th>商品信息</th>
+            <th>站点</th>
+            <th>销量</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><input type="checkbox"></td>
+            <td>
+              <strong>弹框商品</strong>
+              <div>商品ID: 601104440666769</div>
+              <div>SPU ID: 9401217708</div>
+              <div>申报价:¥130.00~¥141.24</div>
+            </td>
+            <td>泰国等91个站点</td>
+            <td>82</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <script src="../src/content.js"></script>
+  </body>
+</html>
