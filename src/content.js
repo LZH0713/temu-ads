@@ -595,15 +595,18 @@
     const existingCols = colgroup.querySelectorAll(
       "col[data-temu-roas-helper-column]"
     );
-    if (existingCols.length === TABLE_COLUMNS.length) {
+    const sourceCols = Array.from(colgroup.children).filter(
+      (column) =>
+        column.tagName === "COL" && !column.dataset.temuRoasHelperColumn
+    );
+    let anchor =
+      sourceCols[budgetIndex] || sourceCols[sourceCols.length - 1] || null;
+
+    if (areHelperNodesReusable(Array.from(existingCols), "col", anchor)) {
       return;
     }
 
     existingCols.forEach((column) => column.remove());
-    const cols = Array.from(colgroup.children).filter(
-      (column) => column.tagName === "COL"
-    );
-    let anchor = cols[budgetIndex] || cols[cols.length - 1] || null;
 
     for (const definition of TABLE_COLUMNS) {
       const column = document.createElement("col");
@@ -661,14 +664,7 @@
     const existingCells = Array.from(
       row.querySelectorAll(":scope > [data-temu-roas-helper-column]")
     );
-    if (
-      existingCells.length === TABLE_COLUMNS.length &&
-      existingCells.every(
-        (cell, index) =>
-          cell.tagName.toLowerCase() === tagName &&
-          cell.dataset.temuRoasHelperColumn === TABLE_COLUMNS[index].key
-      )
-    ) {
+    if (areHelperNodesReusable(existingCells, tagName, referenceCell)) {
       return existingCells;
     }
 
@@ -684,6 +680,22 @@
     }
 
     return cells;
+  }
+
+  function areHelperNodesReusable(nodes, tagName, referenceNode) {
+    if (!referenceNode || nodes.length !== TABLE_COLUMNS.length) {
+      return false;
+    }
+
+    let expectedNode = referenceNode.nextElementSibling;
+    return nodes.every((node, index) => {
+      const isReusable =
+        node === expectedNode &&
+        node.tagName.toLowerCase() === tagName &&
+        node.dataset.temuRoasHelperColumn === TABLE_COLUMNS[index].key;
+      expectedNode = node.nextElementSibling;
+      return isReusable;
+    });
   }
 
   function buildTableCell(tagName, definition, referenceCell) {

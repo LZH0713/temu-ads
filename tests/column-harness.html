@@ -23,6 +23,22 @@
         text-align: left;
         vertical-align: top;
       }
+
+      .harness-controls {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+
+      .harness-controls button {
+        padding: 6px 10px;
+      }
+
+      .harness-controls output {
+        color: #475569;
+        font-size: 12px;
+      }
     </style>
     <script>
       const storageState = {
@@ -79,6 +95,11 @@
     <script src="../src/cost-sync.js"></script>
   </head>
   <body>
+    <div class="harness-controls">
+      <button type="button" data-testid="simulate-page-change">模拟翻页错位</button>
+      <output data-testid="helper-placement-status"></output>
+    </div>
+
     <table>
       <colgroup>
         <col style="width: 40px">
@@ -174,5 +195,119 @@
     </div>
 
     <script src="../src/content.js"></script>
+    <script>
+      const EXPECTED_HELPER_KEYS = [
+        "price",
+        "cost",
+        "grossProfit",
+        "target",
+        "breakEven",
+        "status"
+      ];
+
+      function getPromotionRow() {
+        return document.querySelector("[data-testid='promotion-row']");
+      }
+
+      function readHelperPlacement() {
+        const row = getPromotionRow();
+        const sourceCells = Array.from(row.children).filter(
+          (cell) => !cell.dataset.temuRoasHelperColumn
+        );
+        const budgetCell = sourceCells.find((cell) =>
+          /推广日预算|目标ROAS/i.test(cell.textContent)
+        );
+        const afterBudgetKeys = readSequentialHelperKeys(
+          budgetCell?.nextElementSibling
+        );
+        const cellKeys = Array.from(
+          row.querySelectorAll(":scope > [data-temu-roas-helper-column]")
+        ).map((cell) => cell.dataset.temuRoasHelperColumn);
+
+        const bodyColgroup = row.closest("table").querySelector("colgroup");
+        const sourceCols = Array.from(bodyColgroup.children).filter(
+          (column) => !column.dataset.temuRoasHelperColumn
+        );
+        const afterBudgetColKeys = readSequentialHelperKeys(
+          sourceCols[4]?.nextElementSibling
+        );
+
+        return {
+          afterBudgetColKeys,
+          afterBudgetKeys,
+          cellKeys,
+          isAligned:
+            sameKeys(afterBudgetKeys, EXPECTED_HELPER_KEYS) &&
+            sameKeys(afterBudgetColKeys, EXPECTED_HELPER_KEYS)
+        };
+      }
+
+      function readSequentialHelperKeys(node) {
+        const keys = [];
+        let current = node;
+        while (current?.dataset?.temuRoasHelperColumn) {
+          keys.push(current.dataset.temuRoasHelperColumn);
+          current = current.nextElementSibling;
+        }
+        return keys;
+      }
+
+      function sameKeys(left, right) {
+        return left.length === right.length && left.every((key, index) => key === right[index]);
+      }
+
+      function simulatePageChangeMisalignment() {
+        const row = getPromotionRow();
+        const helperCells = Array.from(
+          row.querySelectorAll(":scope > [data-temu-roas-helper-column]")
+        );
+        const sourceCells = Array.from(row.children).filter(
+          (cell) => !cell.dataset.temuRoasHelperColumn
+        );
+        const cellAnchor = sourceCells[1] || null;
+        for (const cell of helperCells) {
+          row.insertBefore(cell, cellAnchor);
+        }
+
+        const bodyColgroup = row.closest("table").querySelector("colgroup");
+        const helperCols = Array.from(
+          bodyColgroup.querySelectorAll("col[data-temu-roas-helper-column]")
+        );
+        const sourceCols = Array.from(bodyColgroup.children).filter(
+          (column) => !column.dataset.temuRoasHelperColumn
+        );
+        const colAnchor = sourceCols[1] || null;
+        for (const column of helperCols) {
+          bodyColgroup.insertBefore(column, colAnchor);
+        }
+
+        row.querySelector("strong").textContent = "翻页后的测试商品";
+        updatePlacementStatus();
+      }
+
+      function updatePlacementStatus() {
+        const status = document.querySelector(
+          "[data-testid='helper-placement-status']"
+        );
+        const placement = readHelperPlacement();
+        status.textContent = placement.isAligned
+          ? "辅助列位置正常"
+          : "辅助列位置错位";
+        return placement;
+      }
+
+      document
+        .querySelector("[data-testid='simulate-page-change']")
+        .addEventListener("click", () => {
+          simulatePageChangeMisalignment();
+          window.setTimeout(updatePlacementStatus, 500);
+        });
+
+      window.__temuColumnHarness = {
+        readHelperPlacement,
+        simulatePageChangeMisalignment,
+        updatePlacementStatus
+      };
+    </script>
   </body>
 </html>
