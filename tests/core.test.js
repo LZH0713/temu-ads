@@ -42,6 +42,54 @@ test("normalizes ongoing minimum activity price by product ID", () => {
   });
 });
 
+test("ignores enroll prices when all assigned sessions have ended", () => {
+  const prices = TemuPrice.normalizeTemuEnrollPrices(
+    {
+      result: {
+        list: [
+          {
+            productId: 5139109387,
+            sessionStatus: 2,
+            assignSessionList: [{ sessionStatus: 3 }],
+            skcList: [{ skuList: [{ activityPrice: 3180 }] }]
+          },
+          {
+            productId: 5139109387,
+            sessionStatus: 3,
+            assignSessionList: [{ sessionStatus: 3 }],
+            skcList: [{ skuList: [{ activityPrice: 2257 }] }]
+          }
+        ]
+      }
+    },
+    ["5139109387"]
+  );
+
+  assert.deepEqual(prices, {});
+});
+
+test("uses enroll prices when any assigned session is ongoing", () => {
+  const prices = TemuPrice.normalizeTemuEnrollPrices(
+    {
+      result: {
+        list: [
+          {
+            productId: 5139109387,
+            sessionStatus: 2,
+            assignSessionList: [{ sessionStatus: 3 }, { sessionStatus: 2 }],
+            skcList: [{ skuList: [{ activityPrice: 3180 }] }]
+          }
+        ]
+      }
+    },
+    ["5139109387"]
+  );
+
+  assert.deepEqual(prices, {
+    5139109387: 31.8
+  });
+});
+
 test("can include non-ongoing sessions when configured", () => {
   const prices = TemuPrice.normalizeTemuEnrollPrices(
     {
@@ -78,6 +126,42 @@ test("toProductIds keeps unsafe numeric IDs as strings", () => {
   ]);
 });
 
+test("builds Temu request headers from settings and runtime values", () => {
+  assert.deepEqual(
+    TemuPrice.buildTemuHeaders(
+      { temuMallId: "configured-mall", temuAntiContent: "configured-anti" },
+      { mallId: "runtime-mall", antiContent: "runtime-anti", csrfToken: "csrf" }
+    ),
+    {
+      accept: "*/*",
+      "cache-control": "no-cache",
+      "content-type": "application/json",
+      pragma: "no-cache",
+      mallid: "runtime-mall",
+      "anti-content": "runtime-anti",
+      "x-csrf-token": "csrf"
+    }
+  );
+});
+
+test("detects configured or runtime anti-content", () => {
+  assert.equal(TemuPrice.hasTemuAntiContent({}, {}), false);
+  assert.equal(
+    TemuPrice.hasTemuAntiContent(
+      { temuAntiContent: "" },
+      { antiContent: "runtime-anti" }
+    ),
+    true
+  );
+  assert.equal(
+    TemuPrice.hasTemuAntiContent(
+      { temuAntiContent: "configured-anti" },
+      { antiContent: "" }
+    ),
+    true
+  );
+});
+
 test("calculates break-even ROAS and status", () => {
   assert.deepEqual(TemuRoas.calculateBreakEven(117, 80, 4), {
     breakEvenRoas: 117 / 37,
@@ -87,6 +171,13 @@ test("calculates break-even ROAS and status", () => {
 
   assert.equal(TemuRoas.calculateBreakEven(117, 117, 4).message, "成本过高");
   assert.equal(TemuRoas.calculateBreakEven(null, 80, 4).message, "缺价格");
+});
+
+test("calculates gross profit", () => {
+  assert.equal(TemuRoas.calculateGrossProfit(117, 80, 10), 25.3);
+  assert.equal(TemuRoas.calculateGrossProfit(null, 80, 10), null);
+  assert.equal(TemuRoas.calculateGrossProfit(117, null, 10), null);
+  assert.equal(TemuRoas.calculateGrossProfit(117, 80, null), null);
 });
 
 test("uses declared price when activity price is unavailable", () => {

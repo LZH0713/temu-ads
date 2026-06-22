@@ -6,9 +6,7 @@
     const wantedIds = new Set(productIds.map(String));
     const list = readList(payload);
     const onlyOngoing = options.onlyOngoing !== false;
-    const sourceList = onlyOngoing
-      ? list.filter((item) => Number(item?.sessionStatus) === 2)
-      : list;
+    const sourceList = onlyOngoing ? list.filter(isOngoingEnrollItem) : list;
     const prices = {};
 
     for (const item of sourceList) {
@@ -53,6 +51,29 @@
   function readTotal(payload) {
     const total = Number(payload?.result?.total ?? payload?.data?.total ?? payload?.total);
     return Number.isFinite(total) ? total : 0;
+  }
+
+  function isOngoingEnrollItem(item) {
+    const status = readStatusNumber(item?.sessionStatus);
+    if (status != null && status !== 2) {
+      return false;
+    }
+
+    const sessions = Array.isArray(item?.assignSessionList)
+      ? item.assignSessionList
+      : [];
+    if (sessions.length) {
+      return sessions.some(
+        (session) => readStatusNumber(session?.sessionStatus) === 2
+      );
+    }
+
+    return status === 2;
+  }
+
+  function readStatusNumber(value) {
+    const status = Number(value);
+    return Number.isFinite(status) ? status : null;
   }
 
   function readProductId(item, wantedIds) {
@@ -143,8 +164,61 @@
     });
   }
 
+  function buildTemuHeaders(settings = {}, runtimeValues = {}) {
+    const headers = {
+      accept: "*/*",
+      "cache-control": "no-cache",
+      "content-type": "application/json",
+      pragma: "no-cache"
+    };
+
+    const mallId = firstNonEmpty(
+      runtimeValues.mallId,
+      settings.temuMallId
+    );
+    const antiContent = firstNonEmpty(
+      runtimeValues.antiContent,
+      settings.temuAntiContent
+    );
+    const csrfToken = firstNonEmpty(
+      settings.temuCsrfToken,
+      runtimeValues.csrfToken
+    );
+
+    if (mallId) {
+      headers.mallid = mallId;
+    }
+
+    if (antiContent) {
+      headers["anti-content"] = antiContent;
+    }
+
+    if (csrfToken) {
+      headers["x-csrf-token"] = csrfToken;
+    }
+
+    return headers;
+  }
+
+  function hasTemuAntiContent(settings = {}, runtimeValues = {}) {
+    return Boolean(firstNonEmpty(runtimeValues.antiContent, settings.temuAntiContent));
+  }
+
+  function firstNonEmpty(...values) {
+    for (const value of values) {
+      const text = String(value ?? "").trim();
+      if (text) {
+        return text;
+      }
+    }
+
+    return "";
+  }
+
   const api = {
     DEFAULT_TEMU_ENDPOINT,
+    buildTemuHeaders,
+    hasTemuAntiContent,
     normalizeTemuEnrollPrices,
     readList,
     readTotal,

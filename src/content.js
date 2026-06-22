@@ -45,6 +45,7 @@
   const TABLE_COLUMNS = [
     { key: "price", label: "最低活动价", width: 112 },
     { key: "cost", label: "成本价", width: 92 },
+    { key: "grossProfit", label: "毛利", width: 86 },
     { key: "target", label: "目标ROAS", width: 92 },
     { key: "breakEven", label: "回本ROAS", width: 92 },
     { key: "status", label: "判断", width: 86 }
@@ -64,6 +65,8 @@
 
   async function init() {
     injectStyles();
+    window.addEventListener("message", handleAntiContentMessage);
+    requestCapturedAntiContent();
     await reloadState();
 
     chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -130,6 +133,32 @@
     scheduleScan(true);
   }
 
+  function handleAntiContentMessage(event) {
+    if (event.source !== window || event.origin !== location.origin) {
+      return;
+    }
+
+    if (event.data?.type !== "TEMU_ROAS_ANTI_CONTENT") {
+      return;
+    }
+
+    const antiContent = String(event.data.antiContent || "").trim();
+    if (!antiContent || antiContent === state.settings.temuAntiContent) {
+      return;
+    }
+
+    state.settings.temuAntiContent = antiContent;
+  }
+
+  function requestCapturedAntiContent() {
+    window.postMessage(
+      {
+        type: "TEMU_ROAS_REQUEST_ANTI_CONTENT"
+      },
+      location.origin
+    );
+  }
+
   async function reloadState() {
     const [settings, localState] = await Promise.all([
       storageGet("sync", DEFAULT_SYNC_SETTINGS),
@@ -175,6 +204,7 @@
     state.forceRefreshPrices = false;
 
     await requestMissingPrices(spuIds, {
+      forceRefresh: forceRefreshPrices,
       retryErrors: forceRefreshPrices
     });
     refreshPanels();
@@ -696,6 +726,7 @@
       buildValue("SPU", "spu"),
       buildValue("最低价", "price"),
       buildInput("成本", "cost"),
+      buildValue("毛利", "grossProfit"),
       buildInput("目标", "target"),
       buildValue("回本", "breakEven"),
       buildStatus()
@@ -810,7 +841,8 @@
     const missingSpuIds = [...new Set(spuIds)].filter(
       (spuId) =>
         !state.pendingPrices.has(spuId) &&
-        (!state.priceCache.has(spuId) ||
+        (options.forceRefresh ||
+          !state.priceCache.has(spuId) ||
           (options.retryErrors && state.priceCache.get(spuId)?.error))
     );
 
@@ -882,18 +914,10 @@
 
     const productIds = globalThis.TemuPrice.toProductIds(spuIds);
     const pageSize = Math.max(10, Math.min(100, productIds.length * 5));
-    const headers = {
-      accept: "*/*",
-      "content-type": "application/json"
-    };
-
-    if (settings.temuMallId) {
-      headers.mallid = settings.temuMallId;
-    }
-
-    if (settings.temuAntiContent) {
-      headers["anti-content"] = settings.temuAntiContent;
-    }
+    const headers = globalThis.TemuPrice.buildTemuHeaders(
+      settings,
+      readTemuRuntimeValues()
+    );
 
     const combined = {
       result: {
@@ -918,7 +942,7 @@
       if (!response.ok) {
         return {
           ok: false,
-          error: `Temu 接口请求失败：${response.status}`
+          error: await formatTemuFetchError(response)
         };
       }
 
@@ -952,6 +976,75 @@
         }
       )
     };
+  }
+
+  async function formatTemuFetchError(response) {
+    let detail = "";
+    try {
+      detail = compactText((await response.text()).slice(0, 240));
+    } catch (_error) {
+      detail = "";
+    }
+
+    return detail
+      ? `Temu 接口请求失败：${response.status} ${detail}`
+      : `Temu 接口请求失败：${response.status}`;
+  }
+
+  function readTemuRuntimeValues() {
+    const search = new URLSearchParams(location.search);
+    const mallId =
+      search.get("mallId") ||
+      search.get("mallid") ||
+      findStorageValue(/mall.?id/i);
+    const antiContent = findStorageValue(/anti.?content/i);
+    const csrfToken =
+      readCookie("csrfToken") ||
+      readCookie("_csrf") ||
+      findMetaContent(/csrf/i) ||
+      findStorageValue(/csrf|token/i);
+
+    return {
+      mallId,
+      antiContent,
+      csrfToken
+    };
+  }
+
+  function findStorageValue(pattern) {
+    for (const storage of [localStorage, sessionStorage]) {
+      for (let index = 0; index < storage.length; index += 1) {
+        const key = storage.key(index);
+        if (!key || !pattern.test(key)) {
+          continue;
+        }
+
+        const value = storage.getItem(key);
+        if (value && value.length < 4096) {
+          return value;
+        }
+      }
+    }
+
+    return "";
+  }
+
+  function readCookie(name) {
+    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = document.cookie.match(
+      new RegExp(`(?:^|;\\s*)${escapedName}=([^;]*)`)
+    );
+    return match ? decodeURIComponent(match[1]) : "";
+  }
+
+  function findMetaContent(pattern) {
+    for (const meta of document.querySelectorAll("meta")) {
+      if (pattern.test(meta.name || "") || pattern.test(meta.id || "")) {
+        return meta.content || "";
+      }
+    }
+
+    return "";
   }
 
   function fetchPricesViaBackground(spuIds) {
@@ -1012,6 +1105,7 @@
     );
 
     const priceEl = panel.querySelector("[data-role='price']");
+    const grossProfitEl = panel.querySelector("[data-role='grossProfit']");
     const breakEvenEl = panel.querySelector("[data-role='breakEven']");
     const statusEl = panel.querySelector("[data-role='status']");
 
@@ -1046,6 +1140,15 @@
       cost,
       targetRoas
     );
+    const grossProfit = globalThis.TemuRoas.calculateGrossProfit(
+      price,
+      cost,
+      targetRoas
+    );
+    setText(
+      grossProfitEl,
+      grossProfit == null ? "-" : formatNumber(grossProfit)
+    );
     setText(
       breakEvenEl,
       result.breakEvenRoas == null ? "-" : formatNumber(result.breakEvenRoas)
@@ -1077,6 +1180,9 @@
     const priceEl = row.querySelector(
       ".temu-roas-helper-column-cell [data-role='price']"
     );
+    const grossProfitEl = row.querySelector(
+      ".temu-roas-helper-column-cell [data-role='grossProfit']"
+    );
     const breakEvenEl = row.querySelector(
       ".temu-roas-helper-column-cell [data-role='breakEven']"
     );
@@ -1084,7 +1190,7 @@
       ".temu-roas-helper-column-cell [data-role='status']"
     );
 
-    if (!priceEl || !breakEvenEl || !statusEl) {
+    if (!priceEl || !grossProfitEl || !breakEvenEl || !statusEl) {
       return;
     }
 
@@ -1119,6 +1225,15 @@
       price,
       cost,
       targetRoas
+    );
+    const grossProfit = globalThis.TemuRoas.calculateGrossProfit(
+      price,
+      cost,
+      targetRoas
+    );
+    setText(
+      grossProfitEl,
+      grossProfit == null ? "-" : formatNumber(grossProfit)
     );
     setText(
       breakEvenEl,
@@ -1305,6 +1420,10 @@
 
   function compactError(message) {
     const text = String(message || "");
+    if (text.includes("anti-content")) {
+      return "缺anti";
+    }
+
     if (text.includes("agentseller.temu.com")) {
       return "需登录态";
     }

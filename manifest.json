@@ -3,7 +3,7 @@
   "name": "Temu Ads ROAS Helper",
   "version": "0.1.0",
   "description": "Read SPU IDs from promotion pages, fetch lowest activity prices, and calculate break-even ROAS.",
-  "permissions": ["storage", "activeTab", "tabs", "scripting"],
+  "permissions": ["storage", "activeTab", "tabs", "scripting", "webRequest"],
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "src/popup.html",
@@ -13,6 +13,12 @@
     "service_worker": "src/background.js"
   },
   "content_scripts": [
+    {
+      "matches": ["https://agentseller.temu.com/*"],
+      "js": ["src/anti-content-capture.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
     {
       "matches": ["<all_urls>"],
       "js": ["src/temu-price.js", "src/roas.js", "src/content.js"],

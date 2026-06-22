@@ -47,6 +47,14 @@
     };
   }
 
+  function calculateGrossProfit(price, cost, targetRoas) {
+    if (price == null || cost == null || targetRoas == null || targetRoas <= 0) {
+      return null;
+    }
+
+    return price - cost - price / targetRoas;
+  }
+
   function resolveCalculationPrice(priceState, declaredPrice) {
     if (typeof priceState === "number" && Number.isFinite(priceState)) {
       return {
@@ -72,6 +80,7 @@
 
   const api = {
     calculateBreakEven,
+    calculateGrossProfit,
     resolveCalculationPrice
   };
 
