@@ -317,10 +317,19 @@ test("forces plugin cost sync config over stored settings", () => {
       costSyncEnabled: true,
       costSyncOwner: "LZH0713",
       costSyncRepo: "temu-ads",
-      costSyncBranch: "main",
+      costSyncBranch: "cost-data",
       costSyncPath: "data/spu-costs.json"
     }
   );
+});
+
+test("keeps update checks on the main code branch", () => {
+  assert.deepEqual(TemuCostSync.getUpdateSettings(), {
+    updateOwner: "LZH0713",
+    updateRepo: "temu-ads",
+    updateBranch: "main",
+    downloadUrl: "https://github.com/LZH0713/temu-ads/archive/refs/heads/main.zip"
+  });
 });
 
 test("parses cost sync file payloads", () => {

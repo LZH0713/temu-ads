@@ -3,7 +3,7 @@
     costSyncEnabled: true,
     costSyncOwner: "LZH0713",
     costSyncRepo: "temu-ads",
-    costSyncBranch: "main",
+    costSyncBranch: "cost-data",
     costSyncPath: "data/spu-costs.json"
   };
 
@@ -123,7 +123,12 @@
   }
 
   async function checkRemoteVersion(settings = {}, token = "", localVersion = "") {
-    const remote = await readRemoteJsonFile(settings, token, "manifest.json");
+    const updateSettings = getUpdateSettings(settings);
+    const remote = await readRemoteJsonFile(settings, token, "manifest.json", {
+      owner: updateSettings.updateOwner,
+      repo: updateSettings.updateRepo,
+      branch: updateSettings.updateBranch
+    });
     const remoteVersion = String(remote.json?.version || "");
     return {
       hasUpdate: compareVersions(remoteVersion, localVersion) > 0,
@@ -139,7 +144,13 @@
     path = "",
     options = {}
   ) {
-    const config = normalizeSettings(settings);
+    const baseConfig = normalizeSettings(settings);
+    const config = {
+      ...baseConfig,
+      costSyncOwner: String(options.owner || baseConfig.costSyncOwner).trim(),
+      costSyncRepo: String(options.repo || baseConfig.costSyncRepo).trim(),
+      costSyncBranch: String(options.branch || baseConfig.costSyncBranch).trim()
+    };
     const normalizedPath = String(path || "").trim().replace(/^\/+/, "");
     if (!config.costSyncOwner || !config.costSyncRepo || !normalizedPath) {
       throw new Error("远程仓库配置不完整");
@@ -206,6 +217,22 @@
       costSyncPath: String(config.path || DEFAULT_COST_SYNC_SETTINGS.costSyncPath)
         .trim()
         .replace(/^\/+/, "")
+    };
+  }
+
+  function getUpdateSettings(settings = {}) {
+    const config = root.TemuAdsRoasConfig?.update || {};
+    const costSettings = getCostSyncSettings();
+
+    return {
+      updateOwner: String(
+        config.owner || settings.costSyncOwner || costSettings.costSyncOwner
+      ).trim(),
+      updateRepo: String(
+        config.repo || settings.costSyncRepo || costSettings.costSyncRepo
+      ).trim(),
+      updateBranch: String(config.branch || "main").trim(),
+      downloadUrl: String(config.downloadUrl || "").trim()
     };
   }
 
@@ -309,6 +336,7 @@
     checkRemoteVersion,
     compareVersions,
     getCostSyncSettings,
+    getUpdateSettings,
     mergeCostMaps,
     mergeCostMapsPreservingDirty,
     normalizeDirtySpuIds,
