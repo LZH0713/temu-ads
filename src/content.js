@@ -9,6 +9,7 @@
     temuMallId: "",
     temuAntiContent: "",
     temuOnlyOngoing: true,
+    ...globalThis.TemuCostSync.getCostSyncSettings(),
     defaultCost: "80",
     rowSelector: "",
     spuSelector: "",
@@ -17,6 +18,11 @@
 
   const DEFAULT_LOCAL_STATE = {
     costBySpu: {},
+    costSyncDirtySpuIds: [],
+    costSyncLastError: "",
+    costSyncToken: "",
+    costSyncLastPullAt: 0,
+    costSyncLastPushAt: 0,
     targetRoasBySpu: {}
   };
 
@@ -43,7 +49,7 @@
   const REQUIRED_AD_LIST_HEADERS = ["商品推广", "状态", "操作"];
   const REQUIRED_AD_LIST_METRIC_HEADERS = ["总花费", "净总花费"];
   const TABLE_COLUMNS = [
-    { key: "price", label: "最低活动价", width: 112 },
+    { key: "price", label: "最低活动价", width: 190 },
     { key: "cost", label: "成本价", width: 92 },
     { key: "grossProfit", label: "毛利", width: 86 },
     { key: "target", label: "目标ROAS", width: 92 },
@@ -57,6 +63,7 @@
     priceCache: new Map(),
     pendingPrices: new Set(),
     forceRefreshPrices: false,
+    costSyncTimer: null,
     scanTimer: null,
     observer: null
   };
@@ -68,6 +75,7 @@
     window.addEventListener("message", handleAntiContentMessage);
     requestCapturedAntiContent();
     await reloadState();
+    await pullRemoteCostsOnLoad();
 
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName === "sync") {
@@ -77,15 +85,13 @@
               ? DEFAULT_SYNC_SETTINGS[key]
               : change.newValue;
         }
+        state.settings = normalizeSyncSettings(state.settings);
         state.priceCache.clear();
       }
 
       if (areaName === "local") {
         for (const [key, change] of Object.entries(changes)) {
-          state.local[key] =
-            change.newValue === undefined && key in DEFAULT_LOCAL_STATE
-              ? DEFAULT_LOCAL_STATE[key]
-              : change.newValue || {};
+          state.local[key] = readLocalChangeValue(key, change);
         }
       }
 
@@ -133,6 +139,64 @@
     scheduleScan(true);
   }
 
+  async function pullRemoteCostsOnLoad() {
+    if (
+      !state.settings.costSyncEnabled ||
+      !state.local.costSyncToken ||
+      !isTemuRelatedPage()
+    ) {
+      return;
+    }
+
+    try {
+      const pulled = await globalThis.TemuCostSync.pullCostMap(
+        state.settings,
+        state.local.costSyncToken
+      );
+      const dirtySpuIds = globalThis.TemuCostSync.normalizeDirtySpuIds(
+        state.local.costSyncDirtySpuIds
+      );
+      const costBySpu = globalThis.TemuCostSync.mergeCostMapsPreservingDirty(
+        state.local.costBySpu,
+        pulled.costBySpu,
+        dirtySpuIds
+      );
+      state.local.costBySpu = costBySpu;
+      state.local.costSyncDirtySpuIds = dirtySpuIds;
+      await storageSet("local", {
+        costBySpu,
+        costSyncDirtySpuIds: dirtySpuIds,
+        costSyncLastPullAt: Date.now()
+      });
+    } catch (_error) {
+      // Cost sync is best-effort on page load; popup exposes the actionable error.
+    }
+  }
+
+  function isTemuRelatedPage() {
+    return [
+      "ads.temu.com",
+      "agentseller.temu.com",
+      "seller.kuajingmaihuo.com"
+    ].includes(location.hostname);
+  }
+
+  function readLocalChangeValue(key, change) {
+    if (change.newValue === undefined && key in DEFAULT_LOCAL_STATE) {
+      return DEFAULT_LOCAL_STATE[key];
+    }
+
+    if (key === "costBySpu" || key === "targetRoasBySpu") {
+      return change.newValue || {};
+    }
+
+    if (key === "costSyncDirtySpuIds") {
+      return Array.isArray(change.newValue) ? change.newValue : [];
+    }
+
+    return change.newValue;
+  }
+
   function handleAntiContentMessage(event) {
     if (event.source !== window || event.origin !== location.origin) {
       return;
@@ -165,12 +229,23 @@
       storageGet("local", DEFAULT_LOCAL_STATE)
     ]);
 
-    state.settings = { ...DEFAULT_SYNC_SETTINGS, ...settings };
+    state.settings = normalizeSyncSettings(settings);
     state.local = {
       ...DEFAULT_LOCAL_STATE,
       ...localState,
       costBySpu: localState.costBySpu || {},
+      costSyncDirtySpuIds: Array.isArray(localState.costSyncDirtySpuIds)
+        ? localState.costSyncDirtySpuIds
+        : [],
       targetRoasBySpu: localState.targetRoasBySpu || {}
+    };
+  }
+
+  function normalizeSyncSettings(settings = {}) {
+    return {
+      ...DEFAULT_SYNC_SETTINGS,
+      ...settings,
+      ...globalThis.TemuCostSync.getCostSyncSettings()
     };
   }
 
@@ -805,14 +880,116 @@
     const value = parseNumber(event.currentTarget.value);
 
     state.local.costBySpu = { ...(state.local.costBySpu || {}) };
+    state.local.costSyncDirtySpuIds = markDirtySpu(
+      state.local.costSyncDirtySpuIds,
+      spuId
+    );
     if (value == null) {
       delete state.local.costBySpu[spuId];
     } else {
       state.local.costBySpu[spuId] = value;
     }
 
-    await storageSet("local", { costBySpu: state.local.costBySpu });
+    await storageSet("local", {
+      costBySpu: state.local.costBySpu,
+      costSyncDirtySpuIds: state.local.costSyncDirtySpuIds
+    });
+    scheduleCostSyncPush();
     refreshHelperRow(helperRow);
+  }
+
+  function markDirtySpu(dirtySpuIds, spuId) {
+    return globalThis.TemuCostSync.normalizeDirtySpuIds([
+      ...(dirtySpuIds || []),
+      spuId
+    ]);
+  }
+
+  function scheduleCostSyncPush() {
+    if (
+      !state.settings.costSyncEnabled ||
+      !state.local.costSyncToken ||
+      !isTemuRelatedPage()
+    ) {
+      return;
+    }
+
+    window.clearTimeout(state.costSyncTimer);
+    state.costSyncTimer = window.setTimeout(pushCostsToRemote, 1500);
+  }
+
+  async function pushCostsToRemote() {
+    const costBySpuSnapshot = { ...(state.local.costBySpu || {}) };
+    const dirtyAtStart = globalThis.TemuCostSync.normalizeDirtySpuIds(
+      state.local.costSyncDirtySpuIds
+    );
+    const deletedSpuIds = dirtyAtStart.filter(
+      (spuId) =>
+        !Object.prototype.hasOwnProperty.call(costBySpuSnapshot, spuId)
+    );
+
+    try {
+      const pushed = await globalThis.TemuCostSync.pushCostMap(
+        state.settings,
+        state.local.costSyncToken,
+        costBySpuSnapshot,
+        { deletedSpuIds }
+      );
+      const dirtyToClear = new Set(
+        dirtyAtStart.filter((spuId) =>
+          costValuesMatch(state.local.costBySpu, costBySpuSnapshot, spuId)
+        )
+      );
+      const remainingDirtySpuIds =
+        globalThis.TemuCostSync.normalizeDirtySpuIds(
+          (state.local.costSyncDirtySpuIds || []).filter(
+            (spuId) => !dirtyToClear.has(String(spuId))
+          )
+        );
+      const costBySpu = globalThis.TemuCostSync.mergeCostMapsPreservingDirty(
+        state.local.costBySpu,
+        pushed.costBySpu,
+        remainingDirtySpuIds
+      );
+
+      state.local.costBySpu = costBySpu;
+      state.local.costSyncDirtySpuIds = remainingDirtySpuIds;
+      await storageSet("local", {
+        costBySpu,
+        costSyncDirtySpuIds: remainingDirtySpuIds,
+        costSyncLastError: "",
+        costSyncLastPushAt: Date.now()
+      });
+
+      if (remainingDirtySpuIds.length) {
+        scheduleCostSyncPush();
+      }
+    } catch (error) {
+      await storageSet("local", {
+        costSyncLastError: error?.message || "自动推送成本失败"
+      });
+    }
+  }
+
+  function costValuesMatch(currentCostBySpu, snapshotCostBySpu, spuId) {
+    const currentHasCost = Object.prototype.hasOwnProperty.call(
+      currentCostBySpu || {},
+      spuId
+    );
+    const snapshotHasCost = Object.prototype.hasOwnProperty.call(
+      snapshotCostBySpu || {},
+      spuId
+    );
+
+    if (currentHasCost !== snapshotHasCost) {
+      return false;
+    }
+
+    if (!currentHasCost) {
+      return true;
+    }
+
+    return Number(currentCostBySpu[spuId]) === Number(snapshotCostBySpu[spuId]);
   }
 
   async function handleTargetChange(event) {
@@ -868,10 +1045,9 @@
 
       for (const spuId of missingSpuIds) {
         if (response.prices && response.prices[spuId] != null) {
-          const price = Number(response.prices[spuId]);
           state.priceCache.set(
             spuId,
-            Number.isFinite(price) ? price : { error: "价格格式不正确" }
+            normalizeFetchedPriceState(response.prices[spuId])
           );
         } else {
           state.priceCache.set(spuId, { noActivity: true });
@@ -886,6 +1062,41 @@
     } finally {
       missingSpuIds.forEach((spuId) => state.pendingPrices.delete(spuId));
     }
+  }
+
+  function normalizeFetchedPriceState(value) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (!value || typeof value !== "object") {
+      return { error: "价格格式不正确" };
+    }
+
+    const price = parseNumber(value.price);
+    const state = {};
+    if (price != null) {
+      state.price = price;
+    }
+
+    if (value.noActivity) {
+      state.noActivity = true;
+    }
+
+    const clearancePrice = parseNumber(value.ignoredClearance?.price);
+    if (clearancePrice != null) {
+      state.ignoredClearance = {
+        price: clearancePrice,
+        label: String(value.ignoredClearance?.label || "退件散货"),
+        activityName: String(value.ignoredClearance?.activityName || "清仓甩卖")
+      };
+    }
+
+    if (state.price == null && !state.noActivity && !state.ignoredClearance) {
+      return { error: "价格格式不正确" };
+    }
+
+    return state;
   }
 
   async function fetchTemuEnrollPrices(spuIds) {
@@ -968,7 +1179,7 @@
 
     return {
       ok: true,
-      prices: globalThis.TemuPrice.normalizeTemuEnrollPrices(
+      prices: globalThis.TemuPrice.normalizeTemuEnrollPriceStates(
         combined,
         spuIds,
         {
@@ -1090,6 +1301,54 @@
     refreshColumnRow(helperRow);
   }
 
+  function formatPriceText(calculationPrice, priceState) {
+    if (calculationPrice.source === "declared") {
+      return `无活动价${formatIgnoredClearanceLine(priceState)}`;
+    }
+
+    return `${formatNumber(calculationPrice.price)}${formatIgnoredClearanceLine(
+      priceState
+    )}`;
+  }
+
+  function formatPriceTitle(calculationPrice, priceState) {
+    const notes = [];
+    if (calculationPrice.source === "declared") {
+      notes.push(`按最低申报价 ${formatNumber(calculationPrice.price)} 计算`);
+    }
+
+    const ignoredText = formatIgnoredClearanceText(priceState);
+    if (ignoredText) {
+      notes.push(`已忽略${ignoredText}`);
+    }
+
+    return notes.join("；");
+  }
+
+  function formatNoActivityTitle(priceState) {
+    const ignoredText = formatIgnoredClearanceText(priceState);
+    return ignoredText
+      ? `已忽略${ignoredText}；未识别到申报价，无法计算`
+      : "未识别到申报价，无法计算";
+  }
+
+  function formatIgnoredClearanceLine(priceState) {
+    const ignoredText = formatIgnoredClearanceText(priceState);
+    return ignoredText ? `\n${ignoredText}中` : "";
+  }
+
+  function formatIgnoredClearanceText(priceState) {
+    const ignored = priceState?.ignoredClearance;
+    const price = parseNumber(ignored?.price);
+    if (price == null) {
+      return "";
+    }
+
+    const label = String(ignored?.label || "退件散货");
+    const activityName = String(ignored?.activityName || "清仓甩卖");
+    return `${label}${formatNumber(price)}${activityName}`;
+  }
+
   function refreshPanel(panel) {
     const spuId = panel.dataset.spuId;
     const priceState = state.priceCache.get(spuId);
@@ -1112,21 +1371,11 @@
     if (state.pendingPrices.has(spuId)) {
       setText(priceEl, "获取中");
     } else if (price != null) {
-      setText(
-        priceEl,
-        calculationPrice.source === "declared"
-          ? "无活动价"
-          : formatNumber(price)
-      );
-      setTitle(
-        priceEl,
-        calculationPrice.source === "declared"
-          ? `按最低申报价 ${formatNumber(price)} 计算`
-          : ""
-      );
+      setText(priceEl, formatPriceText(calculationPrice, priceState));
+      setTitle(priceEl, formatPriceTitle(calculationPrice, priceState));
     } else if (priceState?.noActivity) {
-      setText(priceEl, "无活动价");
-      setTitle(priceEl, "未识别到申报价，无法计算");
+      setText(priceEl, `无活动价${formatIgnoredClearanceLine(priceState)}`);
+      setTitle(priceEl, formatNoActivityTitle(priceState));
     } else if (priceState?.error) {
       setText(priceEl, priceState.error);
       setTitle(priceEl, priceState.error);
@@ -1198,21 +1447,11 @@
       setText(priceEl, "获取中");
       setTitle(priceEl, "");
     } else if (price != null) {
-      setText(
-        priceEl,
-        calculationPrice.source === "declared"
-          ? "无活动价"
-          : formatNumber(price)
-      );
-      setTitle(
-        priceEl,
-        calculationPrice.source === "declared"
-          ? `按最低申报价 ${formatNumber(price)} 计算`
-          : ""
-      );
+      setText(priceEl, formatPriceText(calculationPrice, priceState));
+      setTitle(priceEl, formatPriceTitle(calculationPrice, priceState));
     } else if (priceState?.noActivity) {
-      setText(priceEl, "无活动价");
-      setTitle(priceEl, "未识别到申报价，无法计算");
+      setText(priceEl, `无活动价${formatIgnoredClearanceLine(priceState)}`);
+      setTitle(priceEl, formatNoActivityTitle(priceState));
     } else if (priceState?.error) {
       setText(priceEl, compactError(priceState.error));
       setTitle(priceEl, priceState.error);
@@ -1527,6 +1766,28 @@
         color: #0f172a !important;
         text-overflow: ellipsis !important;
         white-space: nowrap !important;
+      }
+
+      .temu-roas-helper-column-price {
+        max-width: 210px !important;
+      }
+
+      .temu-roas-helper-column-price .temu-roas-helper-table-value {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        justify-content: center !important;
+        overflow: visible !important;
+        line-height: 1.18 !important;
+        text-align: left !important;
+        text-overflow: clip !important;
+        white-space: pre-line !important;
+      }
+
+      .temu-roas-helper-value[data-role="price"] {
+        min-height: 38px !important;
+        line-height: 1.18 !important;
+        white-space: pre-line !important;
       }
 
       .temu-roas-helper-table-status {

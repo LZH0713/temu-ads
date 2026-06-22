@@ -62,9 +62,15 @@
 
       <section class="section">
         <label class="field">
-          <span>SPU 成本价</span>
-          <textarea id="costBySpu" spellcheck="false" placeholder="123456789=18.5&#10;987654321=22"></textarea>
+          <span>SPU 成本价（只读）</span>
+          <textarea id="costBySpu" spellcheck="false" readonly placeholder="123456789=18.5&#10;987654321=22"></textarea>
         </label>
+      </section>
+
+      <section class="section">
+        <div class="actions compact">
+          <button id="checkUpdate" type="button">检查插件更新</button>
+        </div>
       </section>
 
       <footer class="actions">
@@ -75,6 +81,8 @@
       <p id="status" class="status" role="status"></p>
     </main>
 
+    <script src="plugin-config.js"></script>
+    <script src="cost-sync.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

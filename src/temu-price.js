@@ -1,13 +1,28 @@
 (function attachTemuPrice(root) {
   const DEFAULT_TEMU_ENDPOINT =
     "https://agentseller.temu.com/api/kiana/gamblers/marketing/enroll/list";
+  const CLEARANCE_ACTIVITY_TYPE = 27;
+  const CLEARANCE_PATTERN = /清仓甩卖/;
+  const CLEARANCE_LABEL_PATTERN = /退件散货|退货散货|退[件货][^，,\s）)]*散货|散货/;
 
   function normalizeTemuEnrollPrices(payload, productIds, options = {}) {
+    const states = normalizeTemuEnrollPriceStates(payload, productIds, options);
+    const prices = {};
+    for (const [productId, state] of Object.entries(states)) {
+      if (state.price != null) {
+        prices[productId] = state.price;
+      }
+    }
+
+    return prices;
+  }
+
+  function normalizeTemuEnrollPriceStates(payload, productIds, options = {}) {
     const wantedIds = new Set(productIds.map(String));
     const list = readList(payload);
     const onlyOngoing = options.onlyOngoing !== false;
     const sourceList = onlyOngoing ? list.filter(isOngoingEnrollItem) : list;
-    const prices = {};
+    const states = {};
 
     for (const item of sourceList) {
       const productId = readProductId(item, wantedIds);
@@ -15,17 +30,36 @@
         continue;
       }
 
-      const itemPrices = collectActivityPrices(item);
+      const itemPrices = collectActivityPriceEntries(item);
       if (!itemPrices.length) {
         continue;
       }
 
-      const minPrice = Math.min(...itemPrices);
-      prices[productId] =
-        prices[productId] == null ? minPrice : Math.min(prices[productId], minPrice);
+      const currentState = states[productId] || {};
+      for (const entry of itemPrices) {
+        if (entry.isClearance) {
+          currentState.ignoredClearance = chooseLowerPriceEntry(
+            currentState.ignoredClearance,
+            entry
+          );
+          continue;
+        }
+
+        currentState.price =
+          currentState.price == null
+            ? entry.price
+            : Math.min(currentState.price, entry.price);
+      }
+
+      states[productId] = currentState;
     }
 
-    return prices;
+    return Object.fromEntries(
+      Object.entries(states).map(([productId, state]) => [
+        productId,
+        normalizePriceState(state)
+      ])
+    );
   }
 
   function readList(payload) {
@@ -96,33 +130,159 @@
   }
 
   function collectActivityPrices(node, depth = 0) {
+    return collectActivityPriceEntries(node, depth).map((entry) => entry.price);
+  }
+
+  function collectActivityPriceEntries(node, depth = 0, ancestors = []) {
     if (node == null || depth > 10) {
       return [];
     }
 
     if (Array.isArray(node)) {
-      return node.flatMap((item) => collectActivityPrices(item, depth + 1));
+      return node.flatMap((item) =>
+        collectActivityPriceEntries(item, depth + 1, ancestors)
+      );
     }
 
     if (typeof node !== "object") {
       return [];
     }
 
-    const prices = [];
+    const entries = [];
+    const contextNodes = [node, ...ancestors];
     if (Object.prototype.hasOwnProperty.call(node, "activityPrice")) {
       const price = convertActivityPrice(node.activityPrice);
       if (price != null) {
-        prices.push(price);
+        const clearance = readClearanceContext(contextNodes);
+        entries.push({
+          price,
+          isClearance: Boolean(clearance),
+          label: clearance?.label || "",
+          activityName: clearance?.activityName || ""
+        });
       }
     }
 
     for (const value of Object.values(node)) {
       if (value && typeof value === "object") {
-        prices.push(...collectActivityPrices(value, depth + 1));
+        entries.push(
+          ...collectActivityPriceEntries(value, depth + 1, contextNodes)
+        );
       }
     }
 
-    return prices;
+    return entries;
+  }
+
+  function chooseLowerPriceEntry(currentEntry, nextEntry) {
+    if (!currentEntry || nextEntry.price < currentEntry.price) {
+      return normalizeIgnoredPrice(nextEntry);
+    }
+
+    return currentEntry;
+  }
+
+  function normalizePriceState(state) {
+    const normalized = {};
+    if (state.price != null) {
+      normalized.price = state.price;
+    } else if (state.ignoredClearance) {
+      normalized.noActivity = true;
+    }
+
+    if (state.ignoredClearance) {
+      normalized.ignoredClearance = normalizeIgnoredPrice(state.ignoredClearance);
+    }
+
+    return normalized;
+  }
+
+  function normalizeIgnoredPrice(entry) {
+    return {
+      price: entry.price,
+      label: entry.label || "退件散货",
+      activityName: entry.activityName || "清仓甩卖"
+    };
+  }
+
+  function readClearanceContext(nodes) {
+    if (nodes.some(hasClearanceActivityType)) {
+      return {
+        label: readClearanceLabel(nodes) || "退件散货",
+        activityName: "清仓甩卖"
+      };
+    }
+
+    for (const node of nodes) {
+      const text = readContextText(node);
+      if (!CLEARANCE_PATTERN.test(text)) {
+        continue;
+      }
+
+      return {
+        label: readClearanceLabel(nodes) || "退件散货",
+        activityName: "清仓甩卖"
+      };
+    }
+
+    return null;
+  }
+
+  function hasClearanceActivityType(node) {
+    if (!node || typeof node !== "object") {
+      return false;
+    }
+
+    return [
+      node.activityType,
+      node.activity_type,
+      node.activityTypeId,
+      node.activity_type_id
+    ].some((value) => readStatusNumber(value) === CLEARANCE_ACTIVITY_TYPE);
+  }
+
+  function readClearanceLabel(nodes) {
+    for (const node of nodes) {
+      const match = readContextText(node).match(CLEARANCE_LABEL_PATTERN);
+      if (match?.[0]) {
+        return match[0] === "散货" ? "退件散货" : match[0];
+      }
+    }
+
+    return "";
+  }
+
+  function readContextText(node) {
+    if (!node || typeof node !== "object") {
+      return "";
+    }
+
+    const parts = [];
+    for (const [key, value] of Object.entries(node)) {
+      if (value == null) {
+        continue;
+      }
+
+      if (isScalar(value)) {
+        parts.push(String(value));
+      } else if (
+        !Array.isArray(value) &&
+        typeof value === "object" &&
+        /activity|campaign|promotion|session/i.test(key)
+      ) {
+        for (const childValue of Object.values(value)) {
+          if (isScalar(childValue)) {
+            parts.push(String(childValue));
+          }
+        }
+      }
+    }
+
+    return parts.join(" ");
+  }
+
+  function isScalar(value) {
+    return ["string", "number", "boolean"].includes(typeof value);
   }
 
   function convertActivityPrice(value) {
@@ -219,6 +379,7 @@
     DEFAULT_TEMU_ENDPOINT,
     buildTemuHeaders,
     hasTemuAntiContent,
+    normalizeTemuEnrollPriceStates,
     normalizeTemuEnrollPrices,
     readList,
     readTotal,

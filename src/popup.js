@@ -3,6 +3,7 @@ const DEFAULT_SYNC_SETTINGS = {
   temuMallId: "",
   temuAntiContent: "",
   temuOnlyOngoing: true,
+  ...globalThis.TemuCostSync.getCostSyncSettings(),
   defaultCost: "80",
   rowSelector: "",
   spuSelector: "",
@@ -11,6 +12,11 @@ const DEFAULT_SYNC_SETTINGS = {
 
 const DEFAULT_LOCAL_STATE = {
   costBySpu: {},
+  costSyncDirtySpuIds: [],
+  costSyncLastError: "",
+  costSyncToken: "",
+  costSyncLastPullAt: 0,
+  costSyncLastPushAt: 0,
   targetRoasBySpu: {}
 };
 
@@ -26,18 +32,23 @@ const elements = {
   costBySpu: document.getElementById("costBySpu"),
   save: document.getElementById("save"),
   scan: document.getElementById("scan"),
+  checkUpdate: document.getElementById("checkUpdate"),
   status: document.getElementById("status")
 };
 
 document.addEventListener("DOMContentLoaded", loadForm);
 elements.save.addEventListener("click", saveForm);
 elements.scan.addEventListener("click", scanActiveTab);
+elements.checkUpdate.addEventListener("click", () =>
+  checkRemoteUpdate({ silentLatest: false })
+);
 
 async function loadForm() {
-  const [settings, localState] = await Promise.all([
+  const [storedSettings, localState] = await Promise.all([
     storageGet("sync", DEFAULT_SYNC_SETTINGS),
     storageGet("local", DEFAULT_LOCAL_STATE)
   ]);
+  const settings = normalizePopupSettings(storedSettings);
 
   elements.enabled.checked = Boolean(settings.enabled);
   elements.temuMallId.value = settings.temuMallId || "";
@@ -48,10 +59,148 @@ async function loadForm() {
   elements.spuSelector.value = settings.spuSelector || "";
   elements.targetRoasSelector.value = settings.targetRoasSelector || "";
   elements.costBySpu.value = serializeCostMap(localState.costBySpu || {});
+
+  if (settings.costSyncEnabled && localState.costSyncToken) {
+    await pullRemoteCostsFromForm(false);
+  } else if (settings.costSyncEnabled) {
+    setStatus("成本同步已开启；自动推送需填写 GitHub Token");
+  } else {
+    showCostSyncStatus(localState);
+  }
+
+  await checkRemoteUpdate({ silentLatest: true });
 }
 
 async function saveForm() {
-  const settings = {
+  const settings = readSettingsFromForm();
+
+  await storageSet("sync", settings);
+
+  await scanActiveTab(false);
+  setStatus("已保存");
+}
+
+async function pullRemoteCostsFromForm(showStatus = true) {
+  const settings = readSettingsFromForm();
+  const localState = await storageGet("local", DEFAULT_LOCAL_STATE);
+  const token = String(localState.costSyncToken || "").trim();
+  if (!settings.costSyncEnabled) {
+    setStatus("请先开启成本同步", true);
+    return;
+  }
+
+  try {
+    if (showStatus) {
+      setStatus("正在拉取远程成本...");
+    }
+    const dirtySpuIds = globalThis.TemuCostSync.normalizeDirtySpuIds(
+      localState.costSyncDirtySpuIds
+    );
+    const pulled = await globalThis.TemuCostSync.pullCostMap(settings, token);
+    const costBySpu = globalThis.TemuCostSync.mergeCostMapsPreservingDirty(
+      localState.costBySpu,
+      pulled.costBySpu,
+      dirtySpuIds
+    );
+    elements.costBySpu.value = serializeCostMap(costBySpu);
+    await Promise.all([
+      storageSet("sync", settings),
+      storageSet("local", {
+        costBySpu,
+        costSyncDirtySpuIds: dirtySpuIds,
+        costSyncLastPullAt: Date.now()
+      })
+    ]);
+    await scanActiveTab(false);
+    setStatus(buildPullStatus(pulled.costBySpu, dirtySpuIds));
+  } catch (error) {
+    setStatus(error?.message || "拉取远程成本失败", true);
+  }
+}
+
+async function checkRemoteUpdate(options = {}) {
+  const settings = readSettingsFromForm();
+  const localState = await storageGet("local", DEFAULT_LOCAL_STATE);
+  const token = String(localState.costSyncToken || "").trim();
+  try {
+    if (!options.silentLatest) {
+      setStatus("正在检查插件更新...");
+    }
+    const result = await globalThis.TemuCostSync.checkRemoteVersion(
+      settings,
+      token,
+      chrome.runtime.getManifest().version
+    );
+
+    if (!result.remoteVersion) {
+      setStatus("远程 manifest.json 未返回版本号", true);
+      return;
+    }
+
+    if (result.hasUpdate) {
+      setStatus(buildUpdateStatus(result));
+      return;
+    }
+
+    if (!options.silentLatest) {
+      setStatus(`当前已是最新版本 ${result.localVersion}`);
+    }
+  } catch (error) {
+    setStatus(error?.message || "检查插件更新失败", true);
+  }
+}
+
+function buildUpdateStatus(result) {
+  const downloadUrl =
+    globalThis.TemuAdsRoasConfig?.update?.downloadUrl ||
+    "https://github.com/LZH0713/temu-ads/archive/refs/heads/main.zip";
+
+  return [
+    `发现新版 ${result.remoteVersion}，当前 ${result.localVersion}`,
+    `下载：${downloadUrl}`,
+    "安装：下载后解压 ZIP，在 chrome://extensions/ 开启开发者模式，点“加载已解压的扩展程序”，选择解压后的 temu-ads-main 文件夹。",
+    "已安装过：用新版文件夹替换旧文件夹后，在本插件卡片点“重新加载”。"
+  ].join("\n");
+}
+
+function buildPullStatus(remoteCostBySpu, dirtySpuIds) {
+  const remoteCount = Object.keys(remoteCostBySpu || {}).length;
+  const dirtyCount = dirtySpuIds.length;
+  if (!dirtyCount) {
+    return `已拉取 ${remoteCount} 条远程成本`;
+  }
+
+  return `已拉取 ${remoteCount} 条远程成本，保留 ${dirtyCount} 条本地未同步成本`;
+}
+
+function showCostSyncStatus(localState) {
+  if (localState.costSyncLastError) {
+    setStatus(`成本同步失败：${localState.costSyncLastError}`, true);
+    return;
+  }
+
+  if (localState.costSyncLastPushAt) {
+    setStatus(`成本已同步：${formatTime(localState.costSyncLastPushAt)}`);
+  }
+}
+
+function formatTime(timestamp) {
+  const date = new Date(Number(timestamp) || 0);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toLocaleString("zh-CN", {
+    hour12: false,
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function readSettingsFromForm() {
+  return normalizePopupSettings({
     enabled: elements.enabled.checked,
     temuMallId: elements.temuMallId.value.trim(),
     temuAntiContent: elements.temuAntiContent.value.trim(),
@@ -60,17 +209,15 @@ async function saveForm() {
     rowSelector: elements.rowSelector.value.trim(),
     spuSelector: elements.spuSelector.value.trim(),
     targetRoasSelector: elements.targetRoasSelector.value.trim()
+  });
+}
+
+function normalizePopupSettings(settings = {}) {
+  return {
+    ...DEFAULT_SYNC_SETTINGS,
+    ...settings,
+    ...globalThis.TemuCostSync.getCostSyncSettings()
   };
-
-  const costBySpu = parseCostMap(elements.costBySpu.value);
-
-  await Promise.all([
-    storageSet("sync", settings),
-    storageSet("local", { costBySpu })
-  ]);
-
-  await scanActiveTab(false);
-  setStatus("已保存");
 }
 
 async function scanActiveTab(showStatus = true) {
@@ -101,28 +248,6 @@ async function scanActiveTab(showStatus = true) {
       setStatus("已触发扫描");
     }
   });
-}
-
-function parseCostMap(text) {
-  const result = {};
-  const lines = text.split(/\r?\n/);
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      continue;
-    }
-
-    const [spuId, rawCost] = trimmed.split(/[=,，\s]+/);
-    const cost = Number(rawCost);
-    if (!spuId || !Number.isFinite(cost)) {
-      continue;
-    }
-
-    result[spuId] = cost;
-  }
-
-  return result;
 }
 
 function serializeCostMap(costBySpu) {

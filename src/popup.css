@@ -118,6 +118,13 @@ textarea {
   line-height: 1.35;
 }
 
+textarea[readonly] {
+  resize: none;
+  background: #f8fafc;
+  color: #475569;
+  cursor: default;
+}
+
 input:focus,
 select:focus,
 textarea:focus {
@@ -172,6 +179,11 @@ textarea:focus {
   gap: 8px;
 }
 
+.actions.compact button {
+  height: 30px;
+  font-size: 12px;
+}
+
 button {
   height: 34px;
   flex: 1;
@@ -200,6 +212,7 @@ button:active {
   margin: 0;
   color: #2563eb;
   font-size: 12px;
+  white-space: pre-line;
 }
 
 .status.error {

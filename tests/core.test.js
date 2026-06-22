@@ -2,6 +2,8 @@ const assert = require("node:assert/strict");
 
 const TemuPrice = require("../src/temu-price");
 const TemuRoas = require("../src/roas");
+require("../src/plugin-config");
+const TemuCostSync = require("../src/cost-sync");
 
 const tests = [];
 
@@ -88,6 +90,51 @@ test("uses enroll prices when any assigned session is ongoing", () => {
   assert.deepEqual(prices, {
     5139109387: 31.8
   });
+});
+
+test("ignores clearance sale prices but keeps them as a note", () => {
+  const payload = {
+    result: {
+      list: [
+        {
+          productId: 4624817620,
+          sessionStatus: 2,
+          activityType: 27,
+          activityName: "清仓甩卖",
+          activityLabel: "退件散货",
+          skcList: [{ skuList: [{ activityPrice: 6688 }] }]
+        },
+        {
+          productId: 4624817620,
+          sessionStatus: 2,
+          activityType: 8,
+          activityName: "官方大促",
+          skcList: [{ skuList: [{ activityPrice: 9823 }] }]
+        }
+      ]
+    }
+  };
+
+  assert.deepEqual(
+    TemuPrice.normalizeTemuEnrollPrices(payload, ["4624817620"]),
+    {
+      4624817620: 98.23
+    }
+  );
+
+  assert.deepEqual(
+    TemuPrice.normalizeTemuEnrollPriceStates(payload, ["4624817620"]),
+    {
+      4624817620: {
+        price: 98.23,
+        ignoredClearance: {
+          price: 66.88,
+          label: "退件散货",
+          activityName: "清仓甩卖"
+        }
+      }
+    }
+  );
 });
 
 test("can include non-ongoing sessions when configured", () => {
@@ -182,6 +229,14 @@ test("calculates gross profit", () => {
 
 test("uses declared price when activity price is unavailable", () => {
   assert.deepEqual(
+    TemuRoas.resolveCalculationPrice({ price: 98.23 }, 111.48),
+    {
+      price: 98.23,
+      source: "activity"
+    }
+  );
+
+  assert.deepEqual(
     TemuRoas.resolveCalculationPrice({ noActivity: true }, 118.79),
     {
       price: 118.79,
@@ -193,6 +248,99 @@ test("uses declared price when activity price is unavailable", () => {
     price: null,
     source: "declared-missing"
   });
+});
+
+test("normalizes and merges SPU cost maps", () => {
+  assert.deepEqual(
+    TemuCostSync.normalizeCostMap({
+      " 200 ": "18.5",
+      100: 12,
+      bad: "x"
+    }),
+    {
+      100: 12,
+      200: 18.5
+    }
+  );
+
+  assert.deepEqual(
+    TemuCostSync.mergeCostMaps({ 100: 12, 300: 7 }, { 100: 13, 200: 8 }),
+    {
+      100: 13,
+      200: 8,
+      300: 7
+    }
+  );
+});
+
+test("preserves dirty local SPU costs when pulling remote costs", () => {
+  assert.deepEqual(
+    TemuCostSync.normalizeDirtySpuIds([" 100 ", 200, "", 100]),
+    ["100", "200"]
+  );
+
+  assert.deepEqual(
+    TemuCostSync.mergeCostMapsPreservingDirty(
+      { 100: 14, 300: 7 },
+      { 100: 13, 200: 8, 300: 9 },
+      ["100"]
+    ),
+    {
+      100: 14,
+      200: 8,
+      300: 9
+    }
+  );
+
+  assert.deepEqual(
+    TemuCostSync.mergeCostMapsPreservingDirty(
+      { 300: 7 },
+      { 100: 13, 300: 9 },
+      ["100"]
+    ),
+    {
+      300: 9
+    }
+  );
+});
+
+test("forces plugin cost sync config over stored settings", () => {
+  assert.deepEqual(
+    TemuCostSync.normalizeSettings({
+      costSyncEnabled: false,
+      costSyncOwner: "other-owner",
+      costSyncRepo: "other-repo",
+      costSyncBranch: "dev",
+      costSyncPath: "/tmp/costs.json"
+    }),
+    {
+      costSyncEnabled: true,
+      costSyncOwner: "LZH0713",
+      costSyncRepo: "temu-ads",
+      costSyncBranch: "main",
+      costSyncPath: "data/spu-costs.json"
+    }
+  );
+});
+
+test("parses cost sync file payloads", () => {
+  assert.deepEqual(
+    TemuCostSync.parseCostFile({
+      version: 1,
+      costBySpu: {
+        5139109387: "31.8"
+      }
+    }),
+    {
+      5139109387: 31.8
+    }
+  );
+});
+
+test("compares remote extension versions", () => {
+  assert.equal(TemuCostSync.compareVersions("0.2.0", "0.1.9"), 1);
+  assert.equal(TemuCostSync.compareVersions("0.2.0", "0.2.0"), 0);
+  assert.equal(TemuCostSync.compareVersions("0.1.9", "0.2.0"), -1);
 });
 
 for (const { name, fn } of tests) {

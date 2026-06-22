@@ -63,6 +63,14 @@
       };
     }
 
+    const activityPrice = Number(priceState?.price);
+    if (Number.isFinite(activityPrice)) {
+      return {
+        price: activityPrice,
+        source: "activity"
+      };
+    }
+
     const fallbackPrice =
       declaredPrice === "" || declaredPrice == null ? null : Number(declaredPrice);
     if (priceState?.noActivity && Number.isFinite(fallbackPrice)) {

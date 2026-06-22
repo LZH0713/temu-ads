@@ -65,7 +65,7 @@ async function fetchTemuEnrollPricesViaAgentsellerTab(spuIds, settings) {
 
   return {
     ok: true,
-    prices: globalThis.TemuPrice.normalizeTemuEnrollPrices(
+    prices: globalThis.TemuPrice.normalizeTemuEnrollPriceStates(
       pageResponse.combined,
       spuIds,
       {
@@ -207,9 +207,13 @@ async function fetchTemuEnrollPricesDirect(spuIds, settings) {
 
   return {
     ok: true,
-    prices: globalThis.TemuPrice.normalizeTemuEnrollPrices(combined, spuIds, {
-      onlyOngoing: settings.temuOnlyOngoing
-    })
+    prices: globalThis.TemuPrice.normalizeTemuEnrollPriceStates(
+      combined,
+      spuIds,
+      {
+        onlyOngoing: settings.temuOnlyOngoing
+      }
+    )
   };
 }
 
