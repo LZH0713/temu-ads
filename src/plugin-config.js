@@ -11,8 +11,8 @@
       owner: "LZH0713",
       repo: "temu-ads",
       branch: "main",
-      downloadUrl:
-        "https://github.com/LZH0713/temu-ads/archive/refs/heads/main.zip"
+      downloadUrlTemplate:
+        "https://github.com/LZH0713/temu-ads/archive/refs/tags/{tag}.zip"
     })
   });
 })(typeof globalThis !== "undefined" ? globalThis : this);

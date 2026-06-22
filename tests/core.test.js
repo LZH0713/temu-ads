@@ -328,7 +328,9 @@ test("keeps update checks on the main code branch", () => {
     updateOwner: "LZH0713",
     updateRepo: "temu-ads",
     updateBranch: "main",
-    downloadUrl: "https://github.com/LZH0713/temu-ads/archive/refs/heads/main.zip"
+    downloadUrl: "",
+    downloadUrlTemplate:
+      "https://github.com/LZH0713/temu-ads/archive/refs/tags/{tag}.zip"
   });
 });
 

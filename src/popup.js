@@ -151,16 +151,27 @@ async function checkRemoteUpdate(options = {}) {
 }
 
 function buildUpdateStatus(result) {
-  const downloadUrl =
-    globalThis.TemuAdsRoasConfig?.update?.downloadUrl ||
-    "https://github.com/LZH0713/temu-ads/archive/refs/heads/main.zip";
+  const downloadUrl = buildVersionDownloadUrl(result.remoteVersion);
 
   return [
     `发现新版 ${result.remoteVersion}，当前 ${result.localVersion}`,
     `下载：${downloadUrl}`,
-    "安装：下载后解压 ZIP，在 chrome://extensions/ 开启开发者模式，点“加载已解压的扩展程序”，选择解压后的 temu-ads-main 文件夹。",
+    "安装：下载后解压 ZIP，在 chrome://extensions/ 开启开发者模式，点“加载已解压的扩展程序”，选择解压后的 temu-ads-* 文件夹。",
     "已安装过：用新版文件夹替换旧文件夹后，在本插件卡片点“重新加载”。"
   ].join("\n");
+}
+
+function buildVersionDownloadUrl(version) {
+  const tag = `v${version}`;
+  const updateConfig = globalThis.TemuAdsRoasConfig?.update || {};
+  const template =
+    updateConfig.downloadUrlTemplate ||
+    updateConfig.downloadUrl ||
+    "https://github.com/LZH0713/temu-ads/archive/refs/tags/{tag}.zip";
+
+  return template
+    .replaceAll("{version}", String(version || ""))
+    .replaceAll("{tag}", tag);
 }
 
 function buildPullStatus(remoteCostBySpu, dirtySpuIds) {

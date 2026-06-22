@@ -232,7 +232,8 @@
         config.repo || settings.costSyncRepo || costSettings.costSyncRepo
       ).trim(),
       updateBranch: String(config.branch || "main").trim(),
-      downloadUrl: String(config.downloadUrl || "").trim()
+      downloadUrl: String(config.downloadUrl || "").trim(),
+      downloadUrlTemplate: String(config.downloadUrlTemplate || "").trim()
     };
   }
 
