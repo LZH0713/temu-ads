@@ -1,6 +1,6 @@
 {
   "name": "temu-ads-roas-helper",
-  "version": "0.2.5",
+  "version": "0.2.7",
   "private": true,
   "description": "Temu Ads ROAS helper browser extension.",
   "scripts": {

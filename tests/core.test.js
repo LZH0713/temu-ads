@@ -305,21 +305,45 @@ test("preserves dirty local SPU costs when pulling remote costs", () => {
 });
 
 test("forces plugin cost sync config over stored settings", () => {
+  const normalized = TemuCostSync.normalizeSettings({
+    costSyncEnabled: false,
+    costSyncOwner: "other-owner",
+    costSyncRepo: "other-repo",
+    costSyncBranch: "dev",
+    costSyncPath: "/tmp/costs.json",
+    costSyncToken: "stored-token"
+  });
+
   assert.deepEqual(
-    TemuCostSync.normalizeSettings({
-      costSyncEnabled: false,
-      costSyncOwner: "other-owner",
-      costSyncRepo: "other-repo",
-      costSyncBranch: "dev",
-      costSyncPath: "/tmp/costs.json"
-    }),
+    {
+      ...normalized,
+      costSyncToken: normalized.costSyncToken ? "<configured>" : ""
+    },
     {
       costSyncEnabled: true,
       costSyncOwner: "LZH0713",
       costSyncRepo: "temu-ads",
       costSyncBranch: "cost-data",
-      costSyncPath: "data/spu-costs.json"
+      costSyncPath: "data/spu-costs.json",
+      costSyncToken: "<configured>"
     }
+  );
+});
+
+test("uses local GitHub token before plugin cost sync token", () => {
+  const configuredToken = global.TemuAdsRoasConfig.costSync.token;
+
+  assert.equal(
+    TemuCostSync.resolveGitHubToken(
+      { costSyncToken: "plugin-token" },
+      "local-token"
+    ),
+    "local-token"
+  );
+
+  assert.equal(
+    TemuCostSync.resolveGitHubToken({ costSyncToken: "plugin-token" }),
+    configuredToken
   );
 });
 

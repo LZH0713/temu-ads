@@ -4,7 +4,8 @@
     costSyncOwner: "LZH0713",
     costSyncRepo: "temu-ads",
     costSyncBranch: "cost-data",
-    costSyncPath: "data/spu-costs.json"
+    costSyncPath: "data/spu-costs.json",
+    costSyncToken: ""
   };
 
   function normalizeCostMap(costBySpu = {}) {
@@ -85,17 +86,18 @@
     costBySpu = {},
     options = {}
   ) {
-    const remote = await readRemoteCostFile(settings, token);
+    const config = normalizeSettings(settings);
+    const resolvedToken = resolveGitHubToken(config, token);
+    const remote = await readRemoteCostFile(config, resolvedToken);
     const mergedCostBySpu = mergeCostMaps(parseCostFile(remote.json), costBySpu);
     for (const spuId of normalizeDirtySpuIds(options.deletedSpuIds)) {
       delete mergedCostBySpu[spuId];
     }
 
     const file = buildCostFile(mergedCostBySpu);
-    const config = normalizeSettings(settings);
     const response = await fetch(buildContentsUrl(config), {
       method: "PUT",
-      headers: buildGitHubHeaders(token),
+      headers: buildGitHubHeaders(resolvedToken),
       body: JSON.stringify({
         branch: config.costSyncBranch,
         message: "Update SPU costs",
@@ -159,7 +161,7 @@
     const response = await fetch(
       `${buildContentsUrl(config, normalizedPath)}?ref=${encodeURIComponent(config.costSyncBranch)}`,
       {
-        headers: buildGitHubHeaders(token)
+        headers: buildGitHubHeaders(resolveGitHubToken(config, token))
       }
     );
 
@@ -202,7 +204,10 @@
       costSyncBranch: String(mergedSettings.costSyncBranch).trim(),
       costSyncPath: String(mergedSettings.costSyncPath)
         .trim()
-        .replace(/^\/+/, "")
+        .replace(/^\/+/, ""),
+      costSyncToken: String(
+        fixedSettings.costSyncToken || settings.costSyncToken || ""
+      ).trim()
     };
   }
 
@@ -216,8 +221,16 @@
       costSyncBranch: String(config.branch || DEFAULT_COST_SYNC_SETTINGS.costSyncBranch).trim(),
       costSyncPath: String(config.path || DEFAULT_COST_SYNC_SETTINGS.costSyncPath)
         .trim()
-        .replace(/^\/+/, "")
+        .replace(/^\/+/, ""),
+      costSyncToken: String(config.token || DEFAULT_COST_SYNC_SETTINGS.costSyncToken).trim()
     };
+  }
+
+  function resolveGitHubToken(settings = {}, token = "") {
+    const fixedSettings = getCostSyncSettings();
+    return String(
+      token || fixedSettings.costSyncToken || settings.costSyncToken || ""
+    ).trim();
   }
 
   function getUpdateSettings(settings = {}) {
@@ -345,7 +358,8 @@
     normalizeSettings,
     parseCostFile,
     pullCostMap,
-    pushCostMap
+    pushCostMap,
+    resolveGitHubToken
   };
 
   if (typeof module !== "undefined" && module.exports) {

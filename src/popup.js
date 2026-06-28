@@ -60,10 +60,10 @@ async function loadForm() {
   elements.targetRoasSelector.value = settings.targetRoasSelector || "";
   elements.costBySpu.value = serializeCostMap(localState.costBySpu || {});
 
-  if (settings.costSyncEnabled && localState.costSyncToken) {
+  if (settings.costSyncEnabled && getCostSyncToken(settings, localState)) {
     await pullRemoteCostsFromForm(false);
   } else if (settings.costSyncEnabled) {
-    setStatus("成本同步已开启；自动推送需填写 GitHub Token");
+    setStatus("成本同步已开启；自动推送缺少 GitHub Token");
   } else {
     showCostSyncStatus(localState);
   }
@@ -83,7 +83,7 @@ async function saveForm() {
 async function pullRemoteCostsFromForm(showStatus = true) {
   const settings = readSettingsFromForm();
   const localState = await storageGet("local", DEFAULT_LOCAL_STATE);
-  const token = String(localState.costSyncToken || "").trim();
+  const token = getCostSyncToken(settings, localState);
   if (!settings.costSyncEnabled) {
     setStatus("请先开启成本同步", true);
     return;
@@ -121,7 +121,7 @@ async function pullRemoteCostsFromForm(showStatus = true) {
 async function checkRemoteUpdate(options = {}) {
   const settings = readSettingsFromForm();
   const localState = await storageGet("local", DEFAULT_LOCAL_STATE);
-  const token = String(localState.costSyncToken || "").trim();
+  const token = getCostSyncToken(settings, localState);
   try {
     if (!options.silentLatest) {
       setStatus("正在检查插件更新...");
@@ -229,6 +229,13 @@ function normalizePopupSettings(settings = {}) {
     ...settings,
     ...globalThis.TemuCostSync.getCostSyncSettings()
   };
+}
+
+function getCostSyncToken(settings, localState = {}) {
+  return globalThis.TemuCostSync.resolveGitHubToken(
+    settings,
+    localState.costSyncToken
+  );
 }
 
 async function scanActiveTab(showStatus = true) {

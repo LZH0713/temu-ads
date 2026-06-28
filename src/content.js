@@ -140,9 +140,10 @@
   }
 
   async function pullRemoteCostsOnLoad() {
+    const token = getCostSyncToken();
     if (
       !state.settings.costSyncEnabled ||
-      !state.local.costSyncToken ||
+      !token ||
       !isTemuRelatedPage()
     ) {
       return;
@@ -151,7 +152,7 @@
     try {
       const pulled = await globalThis.TemuCostSync.pullCostMap(
         state.settings,
-        state.local.costSyncToken
+        token
       );
       const dirtySpuIds = globalThis.TemuCostSync.normalizeDirtySpuIds(
         state.local.costSyncDirtySpuIds
@@ -918,9 +919,10 @@
   }
 
   function scheduleCostSyncPush() {
+    const token = getCostSyncToken();
     if (
       !state.settings.costSyncEnabled ||
-      !state.local.costSyncToken ||
+      !token ||
       !isTemuRelatedPage()
     ) {
       return;
@@ -943,7 +945,7 @@
     try {
       const pushed = await globalThis.TemuCostSync.pushCostMap(
         state.settings,
-        state.local.costSyncToken,
+        getCostSyncToken(),
         costBySpuSnapshot,
         { deletedSpuIds }
       );
@@ -1002,6 +1004,13 @@
     }
 
     return Number(currentCostBySpu[spuId]) === Number(snapshotCostBySpu[spuId]);
+  }
+
+  function getCostSyncToken() {
+    return globalThis.TemuCostSync.resolveGitHubToken(
+      state.settings,
+      state.local.costSyncToken
+    );
   }
 
   async function handleTargetChange(event) {
